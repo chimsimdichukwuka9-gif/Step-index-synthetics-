@@ -10,7 +10,7 @@ import requests
 import websocket
 
 
-VERSION = "2026-09-PULLBACK-EARLY-V2"
+VERSION = "2026-09-VOLATILITY-PULLBACK-EARLY-V1"
 
 WS_URL = os.getenv(
     "DERIV_WS_URL",
@@ -21,32 +21,28 @@ BOT = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
 
 INTERVAL = int(os.getenv("SCAN_INTERVAL_SECONDS", "60"))
-STATE_FILE = os.getenv("STATE_FILE", "pullback_state.json")
+STATE_FILE = os.getenv(
+    "STATE_FILE",
+    "volatility_state.json"
+)
 
 
 # ============================================================
-# TARGETS
+# VOLATILITY TARGETS
 # ============================================================
 
 TARGETS = [
-    ("STEP INDEX", "Step Index", "STEP"),
-    ("STEP 200", "Step Index 200", "STEP"),
-    ("STEP 300", "Step Index 300", "STEP"),
-    ("STEP 400", "Step Index 400", "STEP"),
-    ("STEP 500", "Step Index 500", "STEP"),
+    ("VOLATILITY 10", "Volatility 10 Index"),
+    ("VOLATILITY 25", "Volatility 25 Index"),
+    ("VOLATILITY 25 (1S)", "Volatility 25 (1s) Index"),
+    ("VOLATILITY 50", "Volatility 50 Index"),
+    ("VOLATILITY 75", "Volatility 75 Index"),
+    ("VOLATILITY 100", "Volatility 100 Index"),
 
-    ("MULTI STEP 2", "Multi Step 2 Index", "MULTI"),
-    ("MULTI STEP 3", "Multi Step 3 Index", "MULTI"),
-    ("MULTI STEP 4", "Multi Step 4 Index", "MULTI"),
-
-    ("RANGE BREAK 100", "Range Break 100 Index", "RANGE"),
-    ("RANGE BREAK 200", "Range Break 200 Index", "RANGE"),
-
-    ("SKEW STEP 4 UP", "Skew Step 4 Up Index", "SKEW_UP"),
-    ("SKEW STEP 4 DOWN", "Skew Step 4 Down Index", "SKEW_DOWN"),
-
-    ("SKEW STEP 5 UP", "Skew Step 5 Up Index", "SKEW_UP"),
-    ("SKEW STEP 5 DOWN", "Skew Step 5 Down Index", "SKEW_DOWN"),
+    ("VOLATILITY 10 (1S)", "Volatility 10 (1s) Index"),
+    ("VOLATILITY 50 (1S)", "Volatility 50 (1s) Index"),
+    ("VOLATILITY 75 (1S)", "Volatility 75 (1s) Index"),
+    ("VOLATILITY 100 (1S)", "Volatility 100 (1s) Index"),
 ]
 
 
@@ -76,10 +72,23 @@ except Exception:
 
 
 def save_state():
-    with open(STATE_FILE + ".tmp", "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
 
-    os.replace(STATE_FILE + ".tmp", STATE_FILE)
+    with open(
+        STATE_FILE + ".tmp",
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            state,
+            f,
+            indent=2
+        )
+
+    os.replace(
+        STATE_FILE + ".tmp",
+        STATE_FILE
+    )
 
 
 # ============================================================
@@ -87,29 +96,46 @@ def save_state():
 # ============================================================
 
 def tg(text):
+
     if not BOT or not CHAT:
+
         print("\nTELEGRAM NOT CONFIGURED:\n")
         print(text)
+
         return False
 
     try:
+
         r = http.post(
             f"https://api.telegram.org/bot{BOT}/sendMessage",
+
             data={
                 "chat_id": CHAT,
                 "text": text,
             },
+
             timeout=20,
         )
 
         if not r.ok:
-            print("Telegram error:", r.status_code, r.text[:500])
+
+            print(
+                "Telegram error:",
+                r.status_code,
+                r.text[:500]
+            )
+
             return False
 
         return True
 
     except Exception as e:
-        print("Telegram exception:", e)
+
+        print(
+            "Telegram exception:",
+            e
+        )
+
         return False
 
 
@@ -118,6 +144,7 @@ def tg(text):
 # ============================================================
 
 def deriv(payload, timeout=20):
+
     ws = websocket.create_connection(
         WS_URL,
         timeout=timeout,
@@ -125,11 +152,15 @@ def deriv(payload, timeout=20):
     )
 
     try:
-        ws.send(json.dumps(payload))
+
+        ws.send(
+            json.dumps(payload)
+        )
 
         end = time.time() + timeout
 
         while time.time() < end:
+
             raw = ws.recv()
 
             if not raw:
@@ -138,6 +169,7 @@ def deriv(payload, timeout=20):
             data = json.loads(raw)
 
             if "error" in data:
+
                 raise RuntimeError(
                     data["error"].get(
                         "message",
@@ -147,23 +179,31 @@ def deriv(payload, timeout=20):
 
             return data
 
-        raise TimeoutError("Deriv request timeout")
+        raise TimeoutError(
+            "Deriv request timeout"
+        )
 
     finally:
+
         ws.close()
 
 
 # ============================================================
-# SYMBOL NORMALIZATION
+# NORMALIZATION
 # ============================================================
 
 def norm(s):
+
     s = str(s or "").upper()
 
     for c in " -_/().,":
+
         s = s.replace(c, "")
 
-    return s.replace("INDEX", "")
+    return s.replace(
+        "INDEX",
+        ""
+    )
 
 
 # ============================================================
@@ -171,15 +211,20 @@ def norm(s):
 # ============================================================
 
 def discover():
+
     # IMPORTANT:
-    # product_type is intentionally NOT used here.
+    # Do NOT add product_type.
     data = deriv({
         "active_symbols": "brief"
     })
 
     found = {}
 
-    for x in data.get("active_symbols", []):
+    for x in data.get(
+        "active_symbols",
+        []
+    ):
+
         name = (
             x.get("underlying_symbol_name")
             or x.get("display_name")
@@ -192,25 +237,35 @@ def discover():
         )
 
         if name and code:
-            found[norm(name)] = (code, name)
+
+            found[
+                norm(name)
+            ] = (
+                code,
+                name
+            )
 
     out = {}
 
-    print("\n=== SYMBOL DISCOVERY ===")
+    print(
+        "\n=== VOLATILITY SYMBOL DISCOVERY ==="
+    )
 
-    for label, wanted, family in TARGETS:
+    for label, wanted in TARGETS:
 
-        hit = found.get(norm(wanted))
+        hit = found.get(
+            norm(wanted)
+        )
 
         if hit:
+
             out[label] = {
                 "code": hit[0],
                 "display": hit[1],
-                "family": family,
             }
 
             print(
-                "FOUND  ",
+                "FOUND ",
                 label,
                 "->",
                 hit[1],
@@ -220,55 +275,85 @@ def discover():
             )
 
         else:
+
             print(
-                "MISSING ",
+                "MISSING",
                 label,
                 "->",
                 wanted
             )
 
-    print("========================\n")
+    print(
+        "====================================\n"
+    )
 
     return out
 
 
 # ============================================================
-# CANDLES
+# COMPLETED CANDLES
 # ============================================================
 
-def candles(symbol, seconds, count=260):
+def candles(
+    symbol,
+    seconds,
+    count=260
+):
 
     data = deriv({
+
         "ticks_history": symbol,
+
         "adjust_start_time": 1,
+
         "count": count,
+
         "end": "latest",
+
         "granularity": seconds,
+
         "style": "candles",
+
     })
 
     rows = []
 
-    for c in data.get("candles", []):
+    for c in data.get(
+        "candles",
+        []
+    ):
 
         try:
-            rows.append({
-                "time": pd.to_datetime(
-                    int(c["epoch"]),
-                    unit="s",
-                    utc=True
-                ),
 
-                "open": float(c["open"]),
-                "high": float(c["high"]),
-                "low": float(c["low"]),
-                "close": float(c["close"]),
+            rows.append({
+
+                "time":
+                    pd.to_datetime(
+                        int(c["epoch"]),
+                        unit="s",
+                        utc=True
+                    ),
+
+                "open":
+                    float(c["open"]),
+
+                "high":
+                    float(c["high"]),
+
+                "low":
+                    float(c["low"]),
+
+                "close":
+                    float(c["close"]),
+
             })
 
         except Exception:
+
             pass
 
     if not rows:
+
         raise RuntimeError(
             f"No candles for {symbol}"
         )
@@ -280,65 +365,105 @@ def candles(symbol, seconds, count=260):
         .drop_duplicates()
     )
 
-    # Remove the old completed candle boundary.
-    # The 5M trigger is handled separately below.
+    # Remove the currently forming candle.
+    # This function is used for 4H, 1H and 15M.
     cutoff = (
         pd.Timestamp.now(tz="UTC")
-        - pd.Timedelta(seconds=seconds)
+        -
+        pd.Timedelta(
+            seconds=seconds
+        )
     )
 
-    df = df[df.index < cutoff]
+    df = df[
+        df.index < cutoff
+    ]
 
     if len(df) < 70:
+
         raise RuntimeError(
-            f"Only {len(df)} completed candles for {symbol}"
+            f"Only {len(df)} completed "
+            f"candles for {symbol}"
         )
 
     return df
 
 
 # ============================================================
-# 12H RESAMPLING
+# 12H FROM 4H
 # ============================================================
 
 def make12(df4):
 
-    x = df4.resample(
-        "12h",
-        label="right",
-        closed="right"
-    ).agg({
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-    }).dropna()
+    x = (
+        df4
+        .resample(
+            "12h",
+            label="right",
+            closed="right"
+        )
+        .agg({
 
-    now = pd.Timestamp.now(tz="UTC")
+            "open": "first",
 
-    return x[x.index <= now]
+            "high": "max",
+
+            "low": "min",
+
+            "close": "last",
+
+        })
+        .dropna()
+    )
+
+    now = pd.Timestamp.now(
+        tz="UTC"
+    )
+
+    return x[
+        x.index <= now
+    ]
 
 
 # ============================================================
-# INDICATORS
+# EMA
 # ============================================================
 
-def ema(s, n):
+def ema(
+    s,
+    n
+):
+
     return s.ewm(
         span=n,
         adjust=False
     ).mean()
 
 
-def atr(df, n=14):
+# ============================================================
+# ATR
+# ============================================================
+
+def atr(
+    df,
+    n=14
+):
 
     pc = df.close.shift(1)
 
     tr = pd.concat(
         [
+
             df.high - df.low,
-            (df.high - pc).abs(),
-            (df.low - pc).abs(),
+
+            (
+                df.high - pc
+            ).abs(),
+
+            (
+                df.low - pc
+            ).abs(),
+
         ],
         axis=1
     ).max(axis=1)
@@ -349,12 +474,24 @@ def atr(df, n=14):
     ).mean()
 
 
-def rsi(s, n=14):
+# ============================================================
+# RSI
+# ============================================================
+
+def rsi(
+    s,
+    n=14
+):
 
     d = s.diff()
 
-    g = d.clip(lower=0)
-    l = -d.clip(upper=0)
+    g = d.clip(
+        lower=0
+    )
+
+    l = -d.clip(
+        upper=0
+    )
 
     ag = g.ewm(
         alpha=1 / n,
@@ -366,239 +503,439 @@ def rsi(s, n=14):
         adjust=False
     ).mean()
 
-    rs = ag / al.replace(0, np.nan)
+    rs = (
+        ag /
+        al.replace(
+            0,
+            np.nan
+        )
+    )
 
-    return 100 - 100 / (1 + rs)
+    return (
+        100 -
+        100 / (1 + rs)
+    )
 
+
+# ============================================================
+# INDICATORS
+# ============================================================
 
 def ind(df):
 
     x = df.copy()
 
-    x["e20"] = ema(x.close, 20)
-    x["e50"] = ema(x.close, 50)
-    x["atr"] = atr(x)
-    x["rsi"] = rsi(x.close)
+    x["e20"] = ema(
+        x.close,
+        20
+    )
 
-    x["bull"] = x.close > x.open
-    x["bear"] = x.close < x.open
+    x["e50"] = ema(
+        x.close,
+        50
+    )
 
-    x["body"] = (x.close - x.open).abs()
+    x["atr"] = atr(
+        x
+    )
 
-    x["range"] = x.high - x.low
+    x["rsi"] = rsi(
+        x.close
+    )
+
+    x["bull"] = (
+        x.close >
+        x.open
+    )
+
+    x["bear"] = (
+        x.close <
+        x.open
+    )
+
+    x["body"] = (
+        x.close -
+        x.open
+    ).abs()
+
+    x["range"] = (
+        x.high -
+        x.low
+    )
 
     return x
 
 
 # ============================================================
-# CLEAR DIRECTION
+# CLEAR 12H DIRECTION
 # ============================================================
 
 def clear_direction(df):
 
     if len(df) < 55:
+
         return 0
 
     x = ind(df)
 
     a = x.iloc[-1]
+
     b = x.iloc[-4]
 
-    if not np.isfinite(a.atr):
+    if (
+        not np.isfinite(a.atr)
+        or
+        a.atr <= 0
+    ):
+
         return 0
 
-    # Stronger than the old direction test.
-    #
-    # We want the 12H to be CLEAR, not merely slightly bullish
-    # or bearish.
+    # --------------------------------------------------------
+    # 12H BULLISH
+    # --------------------------------------------------------
 
     bull_conditions = [
+
         a.close > a.e20,
+
         a.e20 > a.e50,
+
         a.e20 > b.e20,
+
         a.rsi >= 52,
+
     ]
+
+    # --------------------------------------------------------
+    # 12H BEARISH
+    # --------------------------------------------------------
 
     bear_conditions = [
+
         a.close < a.e20,
+
         a.e20 < a.e50,
+
         a.e20 < b.e20,
+
         a.rsi <= 48,
+
     ]
 
-    bull_score = sum(bull_conditions)
-    bear_score = sum(bear_conditions)
+    bull_score = sum(
+        bull_conditions
+    )
+
+    bear_score = sum(
+        bear_conditions
+    )
+
+    # 3/4 = clear direction
 
     if bull_score >= 3:
+
         return 1
 
     if bear_score >= 3:
+
         return -1
 
     return 0
 
 
 # ============================================================
-# NORMAL DIRECTION FOR LOWER TIMEFRAMES
+# LOWER-TIMEFRAME DIRECTION
 # ============================================================
 
 def direction(df):
 
     if len(df) < 55:
+
         return 0
 
     x = ind(df)
 
     a = x.iloc[-1]
+
     b = x.iloc[-4]
 
     bull = [
+
         a.close > a.e20,
+
         a.e20 > a.e50,
+
         a.e20 > b.e20,
+
     ]
 
     bear = [
+
         a.close < a.e20,
+
         a.e20 < a.e50,
+
         a.e20 < b.e20,
+
     ]
 
     if sum(bull) >= 2:
+
         return 1
 
     if sum(bear) >= 2:
+
         return -1
 
     return 0
 
 
 # ============================================================
-# TIMEFRAME ALIGNMENT
+# 4H + 1H + 15M ALIGNMENT
 # ============================================================
 
-def timeframe_alignment(d12, h4, h1, m15):
+def timeframe_alignment(
+    d12,
+    d4,
+    d1,
+    d15
+):
 
     directions = {
-        "4H": h4,
-        "1H": h1,
-        "15M": m15,
+
+        "4H": d4,
+
+        "1H": d1,
+
+        "15M": d15,
+
     }
 
     aligned = sum(
+
         1
+
         for d in directions.values()
+
         if d == d12
+
     )
 
-    return aligned, directions
+    return (
+        aligned,
+        directions
+    )
 
 
 # ============================================================
-# PULLBACK DETECTION
+# 15M PULLBACK DETECTION
 # ============================================================
 
-def pullback_setup(m15, d):
+def pullback_setup(
+    m15,
+    d
+):
 
     x = ind(m15)
 
-    if len(x) < 10:
-        return False, "NOT_ENOUGH_15M"
+    if len(x) < 15:
+
+        return (
+            False,
+            "NOT_ENOUGH_15M"
+        )
 
     a = x.iloc[-1]
 
-    if not np.isfinite(a.atr) or a.atr <= 0:
-        return False, "ATR_INVALID"
+    recent = x.iloc[-7:-1]
 
-    recent = x.iloc[-6:-1]
+    if (
+        not np.isfinite(a.atr)
+        or
+        a.atr <= 0
+    ):
 
-    if len(recent) < 3:
-        return False, "NO_RECENT_DATA"
+        return (
+            False,
+            "ATR_INVALID"
+        )
 
-    distance = abs(a.close - a.e20) / a.atr
+    # Distance from EMA20
 
-    near_ema = distance <= 1.5
+    distance = (
+        abs(
+            a.close -
+            a.e20
+        )
+        /
+        a.atr
+    )
+
+    near_ema = (
+        distance <= 1.8
+    )
+
+    # ========================================================
+    # BULLISH PULLBACK
+    # ========================================================
 
     if d == 1:
 
+        # Price must have pulled down
+        # toward the EMA.
+
         pullback_low = (
-            recent.low.min() < recent.e20.max()
+            recent.low.min()
+            <=
+            recent.e20.max()
+            +
+            0.60 * a.atr
         )
 
-        recovering = (
-            a.close >= a.e20 * 0.999
+        # The recent candles should show
+        # some countertrend movement.
+
+        countertrend = (
+            (
+                recent.close <
+                recent.open
+            ).sum()
+            >= 1
         )
 
-        ok = near_ema and pullback_low and recovering
+        # Current 15M candle does NOT need
+        # to be strongly bullish yet.
+        # 5M will be the trigger.
+
+        ok = (
+            near_ema
+            and
+            pullback_low
+            and
+            countertrend
+        )
 
         if ok:
-            return True, "BULLISH_PULLBACK_READY"
 
-        return False, "BULLISH_PULLBACK_WAIT"
+            return (
+                True,
+                "15M BULLISH PULLBACK READY"
+            )
 
-    else:
+        return (
+            False,
+            "15M WAITING FOR BULLISH PULLBACK"
+        )
+
+    # ========================================================
+    # BEARISH PULLBACK
+    # ========================================================
+
+    if d == -1:
 
         pullback_high = (
-            recent.high.max() > recent.e20.min()
+            recent.high.max()
+            >=
+            recent.e20.min()
+            -
+            0.60 * a.atr
         )
 
-        recovering = (
-            a.close <= a.e20 * 1.001
+        countertrend = (
+            (
+                recent.close >
+                recent.open
+            ).sum()
+            >= 1
         )
 
-        ok = near_ema and pullback_high and recovering
+        ok = (
+            near_ema
+            and
+            pullback_high
+            and
+            countertrend
+        )
 
         if ok:
-            return True, "BEARISH_PULLBACK_READY"
 
-        return False, "BEARISH_PULLBACK_WAIT"
+            return (
+                True,
+                "15M BEARISH PULLBACK READY"
+            )
+
+        return (
+            False,
+            "15M WAITING FOR BEARISH PULLBACK"
+        )
+
+    return (
+        False,
+        "INVALID_DIRECTION"
+    )
 
 
 # ============================================================
-# EARLY NEW-CANDLE TRIGGER
-#
-# This function intentionally uses the CURRENT 5M CANDLE.
-#
-# We do NOT require it to be completed.
+# CURRENT / FORMING 5M CANDLE
 # ============================================================
 
-def early_trigger5(symbol, d):
-
-    # Request the latest candles directly.
-    # The newest candle can still be forming.
+def current5(symbol):
 
     data = deriv({
+
         "ticks_history": symbol,
+
         "adjust_start_time": 1,
+
         "count": 80,
+
         "end": "latest",
+
         "granularity": TF5,
+
         "style": "candles",
+
     })
 
     rows = []
 
-    for c in data.get("candles", []):
+    for c in data.get(
+        "candles",
+        []
+    ):
 
         try:
-            rows.append({
-                "time": pd.to_datetime(
-                    int(c["epoch"]),
-                    unit="s",
-                    utc=True
-                ),
 
-                "open": float(c["open"]),
-                "high": float(c["high"]),
-                "low": float(c["low"]),
-                "close": float(c["close"]),
+            rows.append({
+
+                "time":
+                    pd.to_datetime(
+                        int(c["epoch"]),
+                        unit="s",
+                        utc=True
+                    ),
+
+                "open":
+                    float(c["open"]),
+
+                "high":
+                    float(c["high"]),
+
+                "low":
+                    float(c["low"]),
+
+                "close":
+                    float(c["close"]),
+
             })
 
         except Exception:
+
             pass
 
-    if len(rows) < 25:
-        return False, "NOT_ENOUGH_5M", None
+    if len(rows) < 30:
+
+        return None
 
     df = (
         pd.DataFrame(rows)
@@ -607,283 +944,372 @@ def early_trigger5(symbol, d):
         .drop_duplicates()
     )
 
-    x = ind(df)
+    return ind(df)
 
-    # IMPORTANT:
-    # -1 = newest CURRENT / FORMING candle
-    # -2 = previous candle
+
+# ============================================================
+# EARLY 5M TRIGGER
+#
+# Uses the CURRENT / FORMING candle.
+#
+# It does NOT wait for the 5M candle to close.
+# ============================================================
+
+def early_trigger5(
+    symbol,
+    d
+):
+
+    x = current5(
+        symbol
+    )
+
+    if x is None:
+
+        return (
+            False,
+            "NOT_ENOUGH_5M",
+            None,
+            None
+        )
+
+    if len(x) < 3:
+
+        return (
+            False,
+            "NOT_ENOUGH_5M",
+            None,
+            None
+        )
+
+    # Current/forming candle
 
     a = x.iloc[-1]
+
+    # Previous candle
+
     p = x.iloc[-2]
 
-    if not np.isfinite(a.atr) or a.atr <= 0:
-        return False, "ATR_INVALID", None
+    if (
+        not np.isfinite(a.atr)
+        or
+        a.atr <= 0
+    ):
 
-    candle_range = a.high - a.low
-    body = abs(a.close - a.open)
+        return (
+            False,
+            "ATR_INVALID",
+            None,
+            None
+        )
+
+    candle_range = (
+        a.high -
+        a.low
+    )
+
+    body = abs(
+        a.close -
+        a.open
+    )
 
     if candle_range <= 0:
-        return False, "NO_MOVEMENT", None
 
-    body_ratio = body / candle_range
+        return (
+            False,
+            "NO_5M_MOVEMENT",
+            None,
+            None
+        )
 
-    # We want a candle that is actually showing direction.
-    # Not simply one tick above/below its open.
+    body_ratio = (
+        body /
+        candle_range
+    )
+
+    body_atr = (
+        body /
+        a.atr
+    )
+
+    # ========================================================
+    # BUY
+    # ========================================================
 
     if d == 1:
 
-        bullish = a.close > a.open
-
-        above_ema = a.close > a.e20
-
-        breaking_previous_high = (
-            a.close > p.high
+        bullish = (
+            a.close >
+            a.open
         )
 
-        enough_body = (
-            body >= 0.20 * a.atr
+        above_ema = (
+            a.close >
+            a.e20
         )
 
-        strong_body = (
-            body_ratio >= 0.35
+        higher_than_previous = (
+            a.close >
+            p.close
+        )
+
+        meaningful_body = (
+            body_atr >= 0.15
+        )
+
+        controlled_candle = (
+            body_ratio >= 0.30
         )
 
         score = sum([
+
             bullish,
+
             above_ema,
-            breaking_previous_high,
-            enough_body,
-            strong_body,
+
+            higher_than_previous,
+
+            meaningful_body,
+
+            controlled_candle,
+
         ])
+
+        # 3/5 required.
+        #
+        # This intentionally does NOT require
+        # a full breakout of the previous high.
+        # That makes the trigger earlier.
 
         if score >= 3:
 
             return (
+
                 True,
-                f"NEW_5M_BUY_{score}/5",
-                a.name.isoformat()
+
+                f"NEW 5M BUY "
+                f"MOVEMENT {score}/5",
+
+                a.name.isoformat(),
+
+                float(a.close)
+
             )
 
         return (
+
             False,
-            f"NEW_5M_BUY_WAIT_{score}/5",
-            a.name.isoformat()
+
+            f"NEW 5M BUY WAIT "
+            f"{score}/5",
+
+            a.name.isoformat(),
+
+            float(a.close)
+
         )
 
-    else:
+    # ========================================================
+    # SELL
+    # ========================================================
 
-        bearish = a.close < a.open
+    if d == -1:
 
-        below_ema = a.close < a.e20
-
-        breaking_previous_low = (
-            a.close < p.low
+        bearish = (
+            a.close <
+            a.open
         )
 
-        enough_body = (
-            body >= 0.20 * a.atr
+        below_ema = (
+            a.close <
+            a.e20
         )
 
-        strong_body = (
-            body_ratio >= 0.35
+        lower_than_previous = (
+            a.close <
+            p.close
+        )
+
+        meaningful_body = (
+            body_atr >= 0.15
+        )
+
+        controlled_candle = (
+            body_ratio >= 0.30
         )
 
         score = sum([
+
             bearish,
+
             below_ema,
-            breaking_previous_low,
-            enough_body,
-            strong_body,
+
+            lower_than_previous,
+
+            meaningful_body,
+
+            controlled_candle,
+
         ])
 
         if score >= 3:
 
             return (
+
                 True,
-                f"NEW_5M_SELL_{score}/5",
-                a.name.isoformat()
+
+                f"NEW 5M SELL "
+                f"MOVEMENT {score}/5",
+
+                a.name.isoformat(),
+
+                float(a.close)
+
             )
 
         return (
+
             False,
-            f"NEW_5M_SELL_WAIT_{score}/5",
-            a.name.isoformat()
+
+            f"NEW 5M SELL WAIT "
+            f"{score}/5",
+
+            a.name.isoformat(),
+
+            float(a.close)
+
         )
 
-
-# ============================================================
-# RANGE BREAK / RETEST
-# ============================================================
-
-def range_setup(m15, d):
-
-    x = ind(m15)
-
-    if len(x) < 70:
-        return False, "NOT_ENOUGH_DATA", None
-
-    recent = x.iloc[-11:-1]
-
-    level = None
-
-    for i in range(len(recent)):
-
-        row = recent.iloc[i]
-
-        prior = (
-            x.loc[:recent.index[i]]
-            .iloc[:-1]
-            .tail(24)
-        )
-
-        if len(prior) < 24:
-            continue
-
-        if d == 1:
-
-            lev = prior.high.max()
-
-            if row.close > lev:
-                level = float(lev)
-                break
-
-        else:
-
-            lev = prior.low.min()
-
-            if row.close < lev:
-                level = float(lev)
-                break
-
-    if level is None:
-        return False, "NO_BREAKOUT", None
-
-    a = x.iloc[-1]
-
-    near = (
-        abs(a.close - level)
-        <= 1.5 * a.atr
+    return (
+        False,
+        "INVALID_DIRECTION",
+        None,
+        None
     )
 
-    hold = (
-        a.close >= level
-        if d == 1
-        else a.close <= level
-    )
-
-    candle = (
-        bool(a.bull)
-        if d == 1
-        else bool(a.bear)
-    )
-
-    ok = near and hold and candle
-
-    if ok:
-        return True, "RETEST_READY", level
-
-    return False, "RETEST_WAIT", level
-
 
 # ============================================================
-# STEP SIGNAL
+# SCAN VOLATILITY INDEX
 # ============================================================
 
-def scan_step(
+def scan_volatility(
     label,
     info,
     h12,
     h4,
     h1,
-    m15,
+    m15
 ):
 
-    d12 = clear_direction(h12)
+    # ========================================================
+    # 12H MAIN DIRECTION
+    # ========================================================
 
-    d4 = direction(h4)
-    d1 = direction(h1)
-    d15 = direction(m15)
+    d12 = clear_direction(
+        h12
+    )
 
-    # --------------------------------------------------------
+    # ========================================================
+    # LOWER TIMEFRAMES
+    # ========================================================
+
+    d4 = direction(
+        h4
+    )
+
+    d1 = direction(
+        h1
+    )
+
+    d15 = direction(
+        m15
+    )
+
+    # ========================================================
     # 12H MUST BE CLEAR
-    # --------------------------------------------------------
+    # ========================================================
 
     if d12 == 0:
 
         return (
             None,
-            f"{label} NO SETUP 12H=NOT CLEAR"
+            f"{label} NO SETUP "
+            f"12H=NOT CLEAR"
         )
 
-    # --------------------------------------------------------
-    # SKEW DIRECTION FILTER
-    # --------------------------------------------------------
-
-    if (
-        info["family"] == "SKEW_UP"
-        and d12 != 1
-    ):
-
-        return (
-            None,
-            f"{label} NO SETUP: 12H NOT BULLISH"
-        )
-
-    if (
-        info["family"] == "SKEW_DOWN"
-        and d12 != -1
-    ):
-
-        return (
-            None,
-            f"{label} NO SETUP: 12H NOT BEARISH"
-        )
-
-    # --------------------------------------------------------
+    # ========================================================
     # 2 OF 3 OR 3 OF 3
-    # --------------------------------------------------------
+    # ========================================================
 
-    aligned, dirs = timeframe_alignment(
-        d12,
-        d4,
-        d1,
-        d15
+    aligned, dirs = (
+        timeframe_alignment(
+            d12,
+            d4,
+            d1,
+            d15
+        )
     )
 
     if aligned < 2:
 
         return (
+
             None,
+
             f"{label} NO SETUP "
-            f"12H={d12} "
-            f"4H={d4} "
-            f"1H={d1} "
-            f"15M={d15} "
-            f"ALIGN={aligned}/3"
+
+            f"12H="
+            f"{d12} "
+
+            f"4H="
+            f"{d4} "
+
+            f"1H="
+            f"{d1} "
+
+            f"15M="
+            f"{d15} "
+
+            f"ALIGN="
+            f"{aligned}/3"
+
         )
 
-    # --------------------------------------------------------
-    # PULLBACK
-    # --------------------------------------------------------
+    # ========================================================
+    # 15M PULLBACK
+    # ========================================================
 
-    pull, pull_text = pullback_setup(
-        m15,
-        d12
+    pull, pull_text = (
+        pullback_setup(
+            m15,
+            d12
+        )
     )
 
     if not pull:
 
         return (
+
             None,
-            f"{label} {pull_text} "
-            f"ALIGN={aligned}/3"
+
+            f"{label} "
+            f"{pull_text} "
+
+            f"ALIGN="
+            f"{aligned}/3"
+
         )
 
-    # --------------------------------------------------------
-    # NEW 5M CANDLE
-    # --------------------------------------------------------
+    # ========================================================
+    # CURRENT 5M CANDLE
+    # ========================================================
 
-    trigger, trigger_text, trigger_time = early_trigger5(
+    (
+        trigger,
+        trigger_text,
+        trigger_time,
+        trigger_price
+    ) = early_trigger5(
         info["code"],
         d12
     )
@@ -891,200 +1317,113 @@ def scan_step(
     if not trigger:
 
         return (
+
             None,
-            f"{label} {trigger_text} "
-            f"ALIGN={aligned}/3"
+
+            f"{label} "
+            f"{trigger_text} "
+
+            f"ALIGN="
+            f"{aligned}/3"
+
         )
 
-    # --------------------------------------------------------
+    # ========================================================
     # SCORE
-    # --------------------------------------------------------
+    # ========================================================
 
     # 12H clear = 4 points
-    # 2/3 alignment = 2 points
-    # 3/3 alignment = 3 points
-    # Pullback = 2 points
-    # New 5M candle = 3 points
+    #
+    # 2/3 alignment = 2
+    #
+    # 3/3 alignment = 3
+    #
+    # 15M pullback = 2
+    #
+    # Current 5M trigger = 3
 
     alignment_points = (
-        3 if aligned == 3 else 2
+        3
+        if aligned == 3
+        else 2
     )
 
     score = (
         4
-        + alignment_points
-        + 2
-        + 3
+        +
+        alignment_points
+        +
+        2
+        +
+        3
     )
 
     max_score = 12
 
-    if aligned == 3:
-        quality = "A+"
-    else:
-        quality = "A"
-
-    return {
-        "label": label,
-        "display": info["display"],
-
-        "direction": (
-            "BUY"
-            if d12 == 1
-            else "SELL"
-        ),
-
-        "score": score,
-        "max": max_score,
-        "quality": quality,
-
-        "d12": d12,
-        "d4": d4,
-        "d1": d1,
-        "d15": d15,
-
-        "aligned": aligned,
-
-        "setup": pull_text,
-        "trigger": trigger_text,
-
-        "time": trigger_time,
-
-        "price": float(
-            m15.close.iloc[-1]
-        ),
-
-        "strategy":
-            "12H Trend + Pullback + "
-            "Early 5M Reversal",
-
-    }, None
-
-
-# ============================================================
-# RANGE SIGNAL
-# ============================================================
-
-def scan_range(
-    label,
-    info,
-    h12,
-    h4,
-    h1,
-    m15,
-):
-
-    d12 = clear_direction(h12)
-
-    d4 = direction(h4)
-    d1 = direction(h1)
-    d15 = direction(m15)
-
-    # 12H required.
-
-    if d12 == 0:
-
-        return (
-            None,
-            f"{label} NO SETUP 12H=NOT CLEAR"
-        )
-
-    aligned, dirs = timeframe_alignment(
-        d12,
-        d4,
-        d1,
-        d15
-    )
-
-    if aligned < 2:
-
-        return (
-            None,
-            f"{label} NO SETUP "
-            f"12H={d12} "
-            f"4H={d4} "
-            f"1H={d1} "
-            f"15M={d15} "
-            f"ALIGN={aligned}/3"
-        )
-
-    ok, phase, level = range_setup(
-        m15,
-        d12
-    )
-
-    if not ok:
-
-        return (
-            None,
-            f"{label} {phase} "
-            f"ALIGN={aligned}/3"
-        )
-
-    trigger, trigger_text, trigger_time = early_trigger5(
-        info["code"],
-        d12
-    )
-
-    if not trigger:
-
-        return (
-            None,
-            f"{label} {trigger_text} "
-            f"ALIGN={aligned}/3"
-        )
-
-    alignment_points = (
-        3 if aligned == 3 else 2
-    )
-
-    score = (
-        4
-        + alignment_points
-        + 2
-        + 3
+    quality = (
+        "A+"
+        if aligned == 3
+        else "A"
     )
 
     return {
-        "label": label,
-        "display": info["display"],
 
-        "direction": (
-            "BUY"
-            if d12 == 1
-            else "SELL"
-        ),
+        "label":
+            label,
 
-        "score": score,
-        "max": 12,
+        "display":
+            info["display"],
 
-        "quality": (
-            "A+"
-            if aligned == 3
-            else "A"
-        ),
+        "direction":
+            (
+                "BUY"
+                if d12 == 1
+                else "SELL"
+            ),
 
-        "d12": d12,
-        "d4": d4,
-        "d1": d1,
-        "d15": d15,
+        "score":
+            score,
 
-        "aligned": aligned,
+        "max":
+            max_score,
 
-        "setup": phase,
-        "trigger": trigger_text,
+        "quality":
+            quality,
 
-        "time": trigger_time,
+        "d12":
+            d12,
 
-        "price": float(
-            m15.close.iloc[-1]
-        ),
+        "d4":
+            d4,
 
-        "level": level,
+        "d1":
+            d1,
+
+        "d15":
+            d15,
+
+        "aligned":
+            aligned,
+
+        "setup":
+            pull_text,
+
+        "trigger":
+            trigger_text,
+
+        "time":
+            trigger_time,
+
+        "price":
+            trigger_price,
 
         "strategy":
-            "Range Break + Pullback + "
-            "Early 5M Reversal",
+            (
+                "12H Direction + "
+                "2/3 MTF Alignment + "
+                "15M Pullback + "
+                "Early Current 5M Reversal"
+            ),
 
     }, None
 
@@ -1107,42 +1446,65 @@ def msg(s):
         else "BEARISH"
     )
 
-    alignment_text = (
-        f'{s["aligned"]}/3'
-    )
+    def tf_text(v):
 
-    t = (
-        f"{emoji} {s['label']} — "
+        if v == 1:
+            return "BULLISH"
+
+        if v == -1:
+            return "BEARISH"
+
+        return "NEUTRAL"
+
+    text = (
+
+        f"{emoji} "
+        f"{s['label']} — "
         f"{s['direction']} SIGNAL\n\n"
 
-        f"Quality: {s['quality']}\n"
-        f"Technical score: "
-        f"{s['score']}/{s['max']}\n\n"
+        f"Quality: "
+        f"{s['quality']}\n"
 
-        f"Symbol: {s['display']}\n"
-        f"Price: {s['price']:.6f}\n\n"
+        f"Technical score: "
+        f"{s['score']}/"
+        f"{s['max']}\n\n"
+
+        f"Symbol: "
+        f"{s['display']}\n"
+
+        f"Price: "
+        f"{s['price']:.6f}\n\n"
 
         f"MULTI-TIMEFRAME:\n"
 
-        f"12H: {direction_text} "
+        f"12H: "
+        f"{direction_text} "
         f"✅ CLEAR\n"
 
         f"4H: "
-        f"{'BULLISH' if s['d4']==1 else 'BEARISH' if s['d4']==-1 else 'NEUTRAL'}\n"
+        f"{tf_text(s['d4'])}\n"
 
         f"1H: "
-        f"{'BULLISH' if s['d1']==1 else 'BEARISH' if s['d1']==-1 else 'NEUTRAL'}\n"
+        f"{tf_text(s['d1'])}\n"
 
         f"15M: "
-        f"{'BULLISH' if s['d15']==1 else 'BEARISH' if s['d15']==-1 else 'NEUTRAL'}\n"
+        f"{tf_text(s['d15'])}\n"
 
-        f"Alignment: {alignment_text}\n\n"
+        f"Alignment: "
+        f"{s['aligned']}/3\n\n"
 
-        f"15M SETUP:\n"
+        f"15M PULLBACK:\n"
         f"{s['setup']}\n\n"
 
-        f"NEW 5M CANDLE:\n"
+        f"CURRENT 5M CANDLE:\n"
         f"{s['trigger']}\n\n"
+
+        f"⚡ EARLY ENTRY:\n"
+        f"Signal triggered from the "
+        f"NEW / FORMING 5M candle.\n"
+
+        f"The 5M candle does NOT need "
+        f"to close first.\n\n"
 
         f"Strategy:\n"
         f"{s['strategy']}\n\n"
@@ -1150,61 +1512,65 @@ def msg(s):
         f"Signal candle:\n"
         f"{s['time']}\n\n"
 
-        f"Scanner: {VERSION}\n"
-        f"Signal only — no automatic trading."
+        f"Scanner: "
+        f"{VERSION}\n"
+
+        f"Signal only — "
+        f"no automatic trading."
     )
 
-    if "level" in s:
-        t += (
-            f"\n\nBreakout level: "
-            f"{s['level']:.6f}"
-        )
-
-    return t
+    return text
 
 
 # ============================================================
 # SCAN ONE
 # ============================================================
 
-def scan_one(label, info):
+def scan_one(
+    label,
+    info
+):
 
     try:
 
-        # -----------------------------------------------
+        # ====================================================
         # 4H
-        # -----------------------------------------------
+        # ====================================================
 
         h4raw = candles(
             info["code"],
             TF4H
         )
 
-        # -----------------------------------------------
+        # ====================================================
         # 12H
-        # -----------------------------------------------
+        # ====================================================
 
-        h12 = make12(h4raw)
+        h12 = make12(
+            h4raw
+        )
 
-        # -----------------------------------------------
-        # Other timeframes
-        # -----------------------------------------------
-
-        h4 = h4raw
+        # ====================================================
+        # 1H
+        # ====================================================
 
         h1 = candles(
             info["code"],
             TF1H
         )
 
+        # ====================================================
+        # 15M
+        # ====================================================
+
         m15 = candles(
             info["code"],
             TF15
         )
 
-        # -----------------------------------------------
-        # Enough 12H history
-        # -----------------------------------------------
+        # ====================================================
+        # DATA CHECK
+        # ====================================================
 
         if len(h12) < 30:
 
@@ -1215,35 +1581,24 @@ def scan_one(label, info):
 
             return
 
-        # -----------------------------------------------
-        # RANGE or STEP
-        # -----------------------------------------------
+        # ====================================================
+        # SCAN
+        # ====================================================
 
-        if info["family"] == "RANGE":
-
-            signal, reason = scan_range(
+        signal, reason = (
+            scan_volatility(
                 label,
                 info,
                 h12,
-                h4,
+                h4raw,
                 h1,
-                m15,
+                m15
             )
+        )
 
-        else:
-
-            signal, reason = scan_step(
-                label,
-                info,
-                h12,
-                h4,
-                h1,
-                m15,
-            )
-
-        # -----------------------------------------------
+        # ====================================================
         # NO SIGNAL
-        # -----------------------------------------------
+        # ====================================================
 
         if not signal:
 
@@ -1251,16 +1606,21 @@ def scan_one(label, info):
 
             return
 
-        # -----------------------------------------------
+        # ====================================================
         # DUPLICATE CONTROL
-        # -----------------------------------------------
+        # ====================================================
+
+        # One signal per exact current 5M candle.
 
         key = (
-            "PULLBACK:"
-            + label
+            "VOL_PULLBACK:"
+            +
+            label
         )
 
-        signal_time = signal["time"]
+        signal_time = (
+            signal["time"]
+        )
 
         if state.get(key) == signal_time:
 
@@ -1271,24 +1631,36 @@ def scan_one(label, info):
 
             return
 
-        # -----------------------------------------------
-        # SEND TELEGRAM
-        # -----------------------------------------------
+        # ====================================================
+        # TELEGRAM
+        # ====================================================
 
-        if tg(msg(signal)):
+        if tg(
+            msg(signal)
+        ):
 
-            state[key] = signal_time
+            state[key] = (
+                signal_time
+            )
 
             save_state()
 
             print(
+
                 label,
+
                 ">>>",
+
                 signal["direction"],
+
                 signal["quality"],
+
                 signal["score"],
+
                 "/",
-                signal["max"],
+
+                signal["max"]
+
             )
 
     except Exception as e:
@@ -1313,6 +1685,17 @@ def main():
         VERSION
     )
 
+    print(
+        "Strategy:"
+    )
+
+    print(
+        "12H direction -> "
+        "2/3 or 3/3 alignment -> "
+        "15M pullback -> "
+        "current 5M reversal"
+    )
+
     if not BOT or not CHAT:
 
         print(
@@ -1322,52 +1705,64 @@ def main():
             "TELEGRAM_CHAT_ID"
         )
 
-    # -----------------------------------------------
-    # DISCOVER SYMBOLS
-    # -----------------------------------------------
+    # ========================================================
+    # DISCOVER
+    # ========================================================
 
     symbols = discover()
 
     if not symbols:
 
         raise RuntimeError(
-            "No target symbols discovered."
+            "No Volatility symbols discovered."
         )
 
     print(
+
         f"Resolved "
         f"{len(symbols)}/"
-        f"{len(TARGETS)} instruments."
+        f"{len(TARGETS)} "
+        f"Volatility instruments."
+
     )
 
-    # -----------------------------------------------
-    # CONTINUOUS SCANNING
-    # -----------------------------------------------
+    # ========================================================
+    # LOOP
+    # ========================================================
 
     while True:
 
         started = time.time()
 
         print(
-            "\n=== SCAN",
+
+            "\n=== VOLATILITY SCAN",
+
             datetime.now(
                 timezone.utc
             ).isoformat(),
+
             "==="
+
         )
 
-        for label, info in symbols.items():
+        for label, info in (
+            symbols.items()
+        ):
 
             scan_one(
                 label,
                 info
             )
 
-            time.sleep(0.5)
+            time.sleep(
+                0.5
+            )
 
         elapsed = (
             time.time()
-            - started
+            -
+            started
         )
 
         wait = max(
@@ -1376,12 +1771,16 @@ def main():
         )
 
         print(
+
             f"Cycle finished. "
             f"Next scan in "
             f"{wait:.0f}s."
+
         )
 
-        time.sleep(wait)
+        time.sleep(
+            wait
+        )
 
 
 # ============================================================
@@ -1389,4 +1788,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
